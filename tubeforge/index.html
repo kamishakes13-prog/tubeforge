@@ -1,4 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TubeForge — AI Income Studio</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
 
 // ═══════════════════════════════════════════════════════════════════
 // STYLES
@@ -691,7 +705,7 @@ function fmtMoney(n) { return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.t
 // ═══════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════
-export default function App() {
+function App() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -729,24 +743,22 @@ export default function App() {
 
   // Load projects from storage
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await window.storage.get("yt_projects");
-        if (r) setProjects(JSON.parse(r.value));
-        const c = await window.storage.get("yt_checks");
-        if (c) setChecks(JSON.parse(c.value));
-      } catch {}
-    })();
+    try {
+      const r = localStorage.getItem("yt_projects");
+      if (r) setProjects(JSON.parse(r));
+      const c = localStorage.getItem("yt_checks");
+      if (c) setChecks(JSON.parse(c));
+    } catch {}
   }, []);
 
   function saveProjects(p) {
     setProjects(p);
-    window.storage.set("yt_projects", JSON.stringify(p)).catch(() => {});
+    try { localStorage.setItem("yt_projects", JSON.stringify(p)); } catch {}
   }
 
   function saveChecks(c) {
     setChecks(c);
-    window.storage.set("yt_checks", JSON.stringify(c)).catch(() => {});
+    try { localStorage.setItem("yt_checks", JSON.stringify(c)); } catch {}
   }
 
   async function handleSetKey() {
@@ -1946,3 +1958,10 @@ No markdown.`
     </>
   );
 }
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
+</html>
