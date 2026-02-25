@@ -1948,9 +1948,7 @@ Total Views: ${data.totalViews.toLocaleString()}
 Videos: ${data.videoCount}
 Description: ${data.description}
 
-Top Performing Videos:
-${data.topVideos.map((v, i) => `${i+1}. ${v.title}`).join('
-')}
+Top Performing Videos:\n${data.topVideos.map((v, i) => `${i+1}. ${v.title}`).join('\n')}
 
 Return JSON:
 {
