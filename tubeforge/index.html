@@ -679,6 +679,7 @@ const NAV = [
   { id: "calculator", icon: "🧮", label: "Revenue Calculator", section: "TOOLS" },
   { id: "niches", icon: "🔥", label: "Niche Research" },
   { id: "checklist", icon: "✅", label: "Launch Checklist" },
+  { id: "analyzer", icon: "🔬", label: "Channel Analyzer", section: "TOOLS" },
 ];
 
 const CHECKLIST_ITEMS = [
@@ -711,6 +712,7 @@ function App() {
   const [showKey, setShowKey] = useState(false);
   const [keyError, setKeyError] = useState("");
   const [keyLoading, setKeyLoading] = useState(false);
+  const [ytKey, setYtKey] = useState(() => { try { return localStorage.getItem("yt_api_key") || ""; } catch { return ""; } });
   const [page, setPage] = useState("dashboard");
   const [pip, setPip] = useState(0); // pipeline step index
 
@@ -1856,11 +1858,250 @@ No markdown.`
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // PAGE ANALYZER
+  // ═══════════════════════════════════════════════════════════════
+  function PageAnalyzer() {
+    const [channelUrl, setChannelUrl] = useState("");
+    const [ytKeyInput, setYtKeyInput] = useState(ytKey);
+    const [channelData, setChannelData] = useState(null);
+    const [ideas, setIdeas] = useState(null);
+    const [analyzeLoading, setAnalyzeLoading] = useState(false);
+    const [analyzeError, setAnalyzeError] = useState("");
+
+    function extractChannelId(url) {
+      // Handle various YouTube URL formats
+      const patterns = [
+        /youtube\.com\/@([^/?]+)/,
+        /youtube\.com\/channel\/([^/?]+)/,
+        /youtube\.com\/c\/([^/?]+)/,
+        /youtube\.com\/user\/([^/?]+)/,
+      ];
+      for (const p of patterns) {
+        const m = url.match(p);
+        if (m) return m[1];
+      }
+      return url.trim();
+    }
+
+    async function fetchChannelData(handle) {
+      // First try to get channel by handle
+      const searchRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(handle)}&maxResults=1&key=${ytKeyInput}`
+      );
+      const searchData = await searchRes.json();
+      if (searchData.error) throw new Error(searchData.error.message);
+      if (!searchData.items || searchData.items.length === 0) throw new Error("Channel not found");
+      
+      const channelId = searchData.items[0].snippet.channelId || searchData.items[0].id.channelId;
+      
+      // Get channel stats
+      const statsRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,brandingSettings&id=${channelId}&key=${ytKeyInput}`
+      );
+      const statsData = await statsRes.json();
+      if (!statsData.items || statsData.items.length === 0) throw new Error("Could not fetch channel stats");
+      const channel = statsData.items[0];
+
+      // Get top videos
+      const videosRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&order=viewCount&maxResults=10&key=${ytKeyInput}`
+      );
+      const videosData = await videosRes.json();
+      const topVideos = (videosData.items || []).map(v => ({
+        title: v.snippet.title,
+        description: v.snippet.description?.slice(0, 100),
+      }));
+
+      return {
+        name: channel.snippet.title,
+        description: channel.snippet.description?.slice(0, 300),
+        subscribers: parseInt(channel.statistics.subscriberCount || 0),
+        totalViews: parseInt(channel.statistics.viewCount || 0),
+        videoCount: parseInt(channel.statistics.videoCount || 0),
+        topVideos,
+      };
+    }
+
+    async function doAnalyze() {
+      if (!ytKeyInput.trim()) { setAnalyzeError("Please enter your YouTube API key"); return; }
+      if (!channelUrl.trim()) { setAnalyzeError("Please enter a channel URL"); return; }
+      setAnalyzeLoading(true);
+      setAnalyzeError("");
+      setChannelData(null);
+      setIdeas(null);
+      try {
+        // Save YT key
+        localStorage.setItem("yt_api_key", ytKeyInput);
+        setYtKey(ytKeyInput);
+
+        const handle = extractChannelId(channelUrl);
+        const data = await fetchChannelData(handle);
+        setChannelData(data);
+
+        // Now ask Claude to generate ideas based on real data
+        const result = await aiJSON(apiKey,
+          `Analyze this YouTube channel and generate 8 tailored video ideas:
+
+Channel: ${data.name}
+Subscribers: ${data.subscribers.toLocaleString()}
+Total Views: ${data.totalViews.toLocaleString()}
+Videos: ${data.videoCount}
+Description: ${data.description}
+
+Top Performing Videos:
+${data.topVideos.map((v, i) => `${i+1}. ${v.title}`).join('
+')}
+
+Return JSON:
+{
+  "niche": "detected niche in 2-4 words",
+  "style": "content style (educational/entertainment/documentary/etc)",
+  "audience": "target audience description",
+  "strengths": ["3 things this channel does well"],
+  "gaps": ["3 content gaps or opportunities"],
+  "ideas": [
+    {
+      "title": "video title",
+      "hook": "why this will perform well for THIS channel",
+      "format": "long|short",
+      "estimatedRpm": 8,
+      "difficulty": "easy|medium|hard"
+    }
+  ]
+}
+No markdown.`
+        );
+        setIdeas(result);
+      } catch(e) {
+        setAnalyzeError(e.message || "Something went wrong");
+      }
+      setAnalyzeLoading(false);
+    }
+
+    return (
+      <div className="fade-in">
+        <div className="section-title">Channel Analyzer</div>
+        <div className="section-sub">Enter any YouTube channel URL to get AI-generated video ideas based on real channel data.</div>
+
+        <div className="card">
+          <div className="field">
+            <label>YouTube API Key</label>
+            <input type="password" placeholder="AIza..."
+              value={ytKeyInput} onChange={e => setYtKeyInput(e.target.value)} />
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 5 }}>
+              Get a free key at <span style={{ color: "var(--gold)" }}>console.cloud.google.com</span> → YouTube Data API v3 → Credentials
+            </div>
+          </div>
+          <div className="field">
+            <label>YouTube Channel URL</label>
+            <input type="text" placeholder="https://youtube.com/@channelname"
+              value={channelUrl} onChange={e => setChannelUrl(e.target.value)} />
+          </div>
+          {analyzeError && <div className="setup-error">⚠ {analyzeError}</div>}
+          <div className="row end">
+            <button className="btn btn-gold" disabled={analyzeLoading || !channelUrl.trim()}
+              onClick={doAnalyze}>
+              {analyzeLoading ? "Analyzing..." : "Analyze Channel →"}
+            </button>
+          </div>
+        </div>
+
+        {analyzeLoading && (
+          <div className="loader-wrap">
+            <div className="spinner" />
+            <div className="loader-text">Fetching channel data...</div>
+            <div className="loader-sub">Pulling real stats and top videos, then asking Claude to generate ideas...</div>
+          </div>
+        )}
+
+        {channelData && ideas && !analyzeLoading && (
+          <>
+            <div className="stats-grid">
+              {[
+                { label: "Channel", value: channelData.name },
+                { label: "Subscribers", value: channelData.subscribers.toLocaleString() },
+                { label: "Total Views", value: (channelData.totalViews / 1000000).toFixed(1) + "M" },
+                { label: "Videos", value: channelData.videoCount.toLocaleString() },
+              ].map(s => (
+                <div key={s.label} className="stat-card">
+                  <div className="stat-label">{s.label}</div>
+                  <div className="stat-value" style={{ color: "var(--gold)", fontSize: "1.2rem" }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid-2">
+              <div className="card">
+                <div className="card-title">Channel Profile</div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>NICHE</div>
+                  <span className="tag tag-gold">{ideas.niche}</span>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>STYLE</div>
+                  <span className="tag tag-blue">{ideas.style}</span>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>AUDIENCE</div>
+                  <div style={{ fontSize: 13, color: "var(--text2)" }}>{ideas.audience}</div>
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-title">Strengths & Gaps</div>
+                <div style={{ marginBottom: 12 }}>
+                  {(ideas.strengths || []).map((s, i) => (
+                    <div key={i} className="insight green" style={{ marginBottom: 6, fontSize: 12 }}>✓ {s}</div>
+                  ))}
+                </div>
+                {(ideas.gaps || []).map((g, i) => (
+                  <div key={i} className="insight gold" style={{ marginBottom: 6, fontSize: 12 }}>💡 {g}</div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-title">8 Tailored Video Ideas</div>
+              {(ideas.ideas || []).map((idea, i) => (
+                <div key={i} style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--r-sm)", padding: "14px 16px", marginBottom: 10 }}>
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, flex: 1, marginRight: 12 }}>{idea.title}</div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <span className={`tag ${idea.format === "long" ? "tag-blue" : "tag-purple"}`}>{idea.format === "long" ? "📺 Long" : "📱 Short"}</span>
+                      <span className={`tag ${idea.difficulty === "easy" ? "tag-green" : idea.difficulty === "medium" ? "tag-gold" : "tag-red"}`}>{idea.difficulty}</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--text2)", marginBottom: 8 }}>{idea.hook}</div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="tag tag-green" style={{ fontSize: 10 }}>~${idea.estimatedRpm} RPM</span>
+                    <button className="btn btn-gold btn-xs" onClick={() => { setPage("pipeline"); setPip(0); setTopic(idea.title); }}>
+                      Use in Pipeline →
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card">
+              <div className="card-title">Top Performing Videos (Reference)</div>
+              {channelData.topVideos.slice(0, 5).map((v, i) => (
+                <div key={i} style={{ padding: "9px 0", borderBottom: "1px solid var(--border)", fontSize: 13, display: "flex", gap: 12, alignItems: "center" }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "var(--text3)", fontSize: 11, width: 20 }}>#{i+1}</span>
+                  <span style={{ flex: 1 }}>{v.title}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════
-  const PAGE_TITLES = { dashboard: "Dashboard", pipeline: "Create Video", projects: "My Projects", calendar: "Upload Schedule", calculator: "Revenue Calculator", niches: "Niche Research", checklist: "Launch Checklist" };
+  const PAGE_TITLES = { dashboard: "Dashboard", pipeline: "Create Video", projects: "My Projects", calendar: "Upload Schedule", calculator: "Revenue Calculator", niches: "Niche Research", checklist: "Launch Checklist", analyzer: "Channel Analyzer" };
 
-  const PAGES = { dashboard: PageDashboard, pipeline: PagePipeline, projects: PageProjects, calendar: PageCalendar, calculator: PageCalculator, niches: PageNiches, checklist: PageChecklist };
+  const PAGES = { dashboard: PageDashboard, pipeline: PagePipeline, projects: PageProjects, calendar: PageCalendar, calculator: PageCalculator, niches: PageNiches, checklist: PageChecklist, analyzer: PageAnalyzer };
   const ActivePage = PAGES[page];
 
   // ── API KEY SETUP SCREEN ──────────────────────────────────────────
